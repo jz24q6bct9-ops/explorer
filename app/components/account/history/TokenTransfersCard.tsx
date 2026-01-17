@@ -99,18 +99,18 @@ function TransferRow({
 function transfersToCSV(transfers: TransferData[]): string {
     const headers = ['Transaction Signature', 'Timestamp', 'Source', 'Destination', 'Amount', 'Units', 'Result'];
     const rows = transfers.map(t => [
-        t.signature,
+        String(t.signature),
         t.blockTime ? new Date(t.blockTime * 1000).toISOString() : '',
         t.transfer.source.toBase58(),
         t.transfer.destination.toBase58(),
-        t.amountString,
-        t.units,
-        t.statusText,
+        String(t.amountString),
+        String(t.units),
+        String(t.statusText),
     ]);
     
     const csvContent = [
         headers.join(','),
-        ...rows.map(row => row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(',')),
+        ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')),
     ].join('\n');
     
     return csvContent;
