@@ -110,7 +110,7 @@ function transfersToCSV(transfers: TransferData[]): string {
     
     const csvContent = [
         headers.join(','),
-        ...rows.map(row => row.map(cell => `"${cell}"`).join(',')),
+        ...rows.map(row => row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(',')),
     ].join('\n');
     
     return csvContent;
@@ -130,6 +130,11 @@ function transfersToJSON(transfers: TransferData[]): string {
     }));
     
     return JSON.stringify(data, null, 2);
+}
+
+// Helper function to sanitize address for use in filenames
+function sanitizeFilename(address: string): string {
+    return address.replace(/[^a-zA-Z0-9.-]/g, '_');
 }
 
 export function TokenTransfersCard({ address }: { address: string }) {
@@ -264,7 +269,8 @@ export function TokenTransfersCard({ address }: { address: string }) {
         try {
             const csv = transfersToCSV(allTransfers);
             const base64 = Buffer.from(csv).toString('base64');
-            await triggerDownload(base64, `token-transfers-${address}.csv`, { type: 'text/csv' });
+            const filename = `token-transfers-${sanitizeFilename(address)}.csv`;
+            await triggerDownload(base64, filename, { type: 'text/csv' });
         } catch (error) {
             console.error('Failed to export CSV:', error);
         }
@@ -274,7 +280,8 @@ export function TokenTransfersCard({ address }: { address: string }) {
         try {
             const json = transfersToJSON(allTransfers);
             const base64 = Buffer.from(json).toString('base64');
-            await triggerDownload(base64, `token-transfers-${address}.json`, { type: 'application/json' });
+            const filename = `token-transfers-${sanitizeFilename(address)}.json`;
+            await triggerDownload(base64, filename, { type: 'application/json' });
         } catch (error) {
             console.error('Failed to export JSON:', error);
         }
