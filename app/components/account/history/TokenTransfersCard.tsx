@@ -148,6 +148,7 @@ export function TokenTransfersCard({ address }: { address: string }) {
     const { data: tokenInfo, isLoading: tokenInfoLoading } = useSWR(swrKey, fetchTokenInfo);
     const [isCollectingForExport, setIsCollectingForExport] = React.useState(false);
     const collectingRef = React.useRef(false);
+    const resolveCollectionRef = React.useRef<(() => void) | null>(null);
 
     const transactionRows = React.useMemo(() => {
         if (history?.data?.fetched) {
@@ -172,7 +173,21 @@ export function TokenTransfersCard({ address }: { address: string }) {
         if (collectingRef.current && history?.data?.foundOldest) {
             collectingRef.current = false;
             setIsCollectingForExport(false);
+            // Resolve the promise to signal collection is complete
+            if (resolveCollectionRef.current) {
+                resolveCollectionRef.current();
+                resolveCollectionRef.current = null;
+            }
         }
+
+        // Cleanup on unmount
+        return () => {
+            if (collectingRef.current && resolveCollectionRef.current) {
+                collectingRef.current = false;
+                resolveCollectionRef.current();
+                resolveCollectionRef.current = null;
+            }
+        };
     }, [history, loadMore]);
 
     const { allTransfers, hasTimestamps } = React.useMemo(() => {
@@ -291,14 +306,9 @@ export function TokenTransfersCard({ address }: { address: string }) {
         collectingRef.current = true;
         setIsCollectingForExport(true);
         
-        // Wait for the effect to complete loading
+        // Wait for the effect to complete loading via callback
         return new Promise<void>((resolve) => {
-            const checkInterval = setInterval(() => {
-                if (!collectingRef.current || history?.data?.foundOldest) {
-                    clearInterval(checkInterval);
-                    resolve();
-                }
-            }, 100);
+            resolveCollectionRef.current = resolve;
         });
     }, [history]);
 
