@@ -16,13 +16,15 @@ import { Cluster } from '@utils/cluster';
 import { normalizeTokenAmount } from '@utils/index';
 import { InstructionContainer } from '@utils/instruction';
 import React, { useMemo } from 'react';
+import { RefreshCw } from 'react-feather';
 import Moment from 'react-moment';
 import { create } from 'superstruct';
 import useSWR from 'swr';
 
+import { triggerDownload } from '@/app/shared/lib/triggerDownload';
 import { getTokenInfo, getTokenInfoSwrKey } from '@/app/utils/token-info';
 
-import { getTransactionRows, HistoryCardFooter, HistoryCardHeader } from '../HistoryCardComponents';
+import { getTransactionRows, HistoryCardFooter } from '../HistoryCardComponents';
 import { extractMintDetails, MintDetails } from './common';
 
 type IndexedTransfer = {
@@ -91,6 +93,43 @@ function TransferRow({
             </td>
         </tr>
     );
+}
+
+// Helper function to convert transfers to CSV format
+function transfersToCSV(transfers: TransferData[]): string {
+    const headers = ['Transaction Signature', 'Timestamp', 'Source', 'Destination', 'Amount', 'Units', 'Result'];
+    const rows = transfers.map(t => [
+        t.signature,
+        t.blockTime ? new Date(t.blockTime * 1000).toISOString() : '',
+        t.transfer.source.toBase58(),
+        t.transfer.destination.toBase58(),
+        t.amountString,
+        t.units,
+        t.statusText,
+    ]);
+    
+    const csvContent = [
+        headers.join(','),
+        ...rows.map(row => row.map(cell => `"${cell}"`).join(',')),
+    ].join('\n');
+    
+    return csvContent;
+}
+
+// Helper function to convert transfers to JSON format
+function transfersToJSON(transfers: TransferData[]): string {
+    const data = transfers.map(t => ({
+        amount: t.amountString,
+        blockTime: t.blockTime,
+        destination: t.transfer.destination.toBase58(),
+        signature: t.signature,
+        source: t.transfer.source.toBase58(),
+        status: t.statusText,
+        timestamp: t.blockTime ? new Date(t.blockTime * 1000).toISOString() : null,
+        units: t.units,
+    }));
+    
+    return JSON.stringify(data, null, 2);
 }
 
 export function TokenTransfersCard({ address }: { address: string }) {
@@ -221,6 +260,26 @@ export function TokenTransfersCard({ address }: { address: string }) {
         };
     }, [history, transactionRows, tokenInfo, pubkey, address, cluster, tokenInfoLoading]);
 
+    const handleExportCSV = React.useCallback(async () => {
+        try {
+            const csv = transfersToCSV(allTransfers);
+            const base64 = Buffer.from(csv).toString('base64');
+            await triggerDownload(base64, `token-transfers-${address}.csv`, { type: 'text/csv' });
+        } catch (error) {
+            console.error('Failed to export CSV:', error);
+        }
+    }, [allTransfers, address]);
+
+    const handleExportJSON = React.useCallback(async () => {
+        try {
+            const json = transfersToJSON(allTransfers);
+            const base64 = Buffer.from(json).toString('base64');
+            await triggerDownload(base64, `token-transfers-${address}.json`, { type: 'application/json' });
+        } catch (error) {
+            console.error('Failed to export JSON:', error);
+        }
+    }, [allTransfers, address]);
+
     if (!history) {
         return null;
     }
@@ -236,7 +295,40 @@ export function TokenTransfersCard({ address }: { address: string }) {
     const fetching = history.status === FetchStatus.Fetching;
     return (
         <div className="card">
-            <HistoryCardHeader fetching={fetching} refresh={() => refresh()} title="Token Transfers" />
+            <div className="card-header align-items-center">
+                <h3 className="card-header-title">Token Transfers</h3>
+                <div className="d-flex gap-2">
+                    <button
+                        className="btn btn-white btn-sm"
+                        onClick={handleExportCSV}
+                        disabled={fetching || allTransfers.length === 0}
+                        title="Export to CSV"
+                    >
+                        Export CSV
+                    </button>
+                    <button
+                        className="btn btn-white btn-sm"
+                        onClick={handleExportJSON}
+                        disabled={fetching || allTransfers.length === 0}
+                        title="Export to JSON"
+                    >
+                        Export JSON
+                    </button>
+                    <button className="btn btn-white btn-sm" disabled={fetching} onClick={() => refresh()}>
+                        {fetching ? (
+                            <>
+                                <span className="align-text-top spinner-grow spinner-grow-sm me-2"></span>
+                                Loading
+                            </>
+                        ) : (
+                            <>
+                                <RefreshCw className="align-text-top me-2" size={13} />
+                                Refresh
+                            </>
+                        )}
+                    </button>
+                </div>
+            </div>
             <div className="table-responsive mb-0">
                 <table className="table table-sm table-nowrap card-table">
                     <thead>
