@@ -165,30 +165,39 @@ export function TokenTransfersCard({ address }: { address: string }) {
 
     // Auto-load more transfers when collecting for export
     React.useEffect(() => {
+        // Only proceed if we're collecting and not already fetching
         if (collectingRef.current && history?.data?.foundOldest === false && history.status !== FetchStatus.Fetching) {
             loadMore();
         }
         
-        // Stop collecting when we've found the oldest
-        if (collectingRef.current && history?.data?.foundOldest) {
+        // Stop collecting when we've found the oldest or if there's an error
+        if (collectingRef.current && (history?.data?.foundOldest || history?.status === FetchStatus.Failed)) {
             collectingRef.current = false;
             setIsCollectingForExport(false);
-            // Resolve the promise to signal collection is complete
+            // Resolve or reject the promise based on status
             if (resolveCollectionRef.current) {
+                if (history?.status === FetchStatus.Failed) {
+                    // If there's an error, we still resolve since we have partial data
+                    // The user can see the error and decide whether to retry
+                    console.warn('Collection stopped due to fetch error, exporting partial data');
+                }
                 resolveCollectionRef.current();
                 resolveCollectionRef.current = null;
             }
         }
-
-        // Cleanup on unmount
+    }, [history, loadMore]);
+    
+    // Cleanup only on unmount, not on every render
+    React.useEffect(() => {
         return () => {
+            // Only cleanup if actually collecting
             if (collectingRef.current && resolveCollectionRef.current) {
                 collectingRef.current = false;
                 resolveCollectionRef.current();
                 resolveCollectionRef.current = null;
             }
         };
-    }, [history, loadMore]);
+    }, []); // Empty deps array means this only runs on mount/unmount
 
     const { allTransfers, hasTimestamps } = React.useMemo(() => {
         const detailedHistoryMap = history?.data?.transactionMap || new Map<string, ParsedTransactionWithMeta>();
