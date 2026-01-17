@@ -143,9 +143,12 @@ export function TokenTransfersCard({ address }: { address: string }) {
     const history = useAccountHistory(address);
     const fetchAccountHistory = useFetchAccountHistory();
     const refresh = () => fetchAccountHistory(pubkey, true, true);
-    const loadMore = () => fetchAccountHistory(pubkey, true);
+    const loadMore = React.useCallback(() => fetchAccountHistory(pubkey, true), [fetchAccountHistory, pubkey]);
     const swrKey = useMemo(() => getTokenInfoSwrKey(address, cluster, url), [address, cluster, url]);
     const { data: tokenInfo, isLoading: tokenInfoLoading } = useSWR(swrKey, fetchTokenInfo);
+    const [isCollectingForExport, setIsCollectingForExport] = React.useState(false);
+    const collectingRef = React.useRef(false);
+    const resolveCollectionRef = React.useRef<(() => void) | null>(null);
 
     const transactionRows = React.useMemo(() => {
         if (history?.data?.fetched) {
@@ -159,6 +162,42 @@ export function TokenTransfersCard({ address }: { address: string }) {
             refresh();
         }
     }, [address]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Auto-load more transfers when collecting for export
+    React.useEffect(() => {
+        // Only proceed if we're collecting and not already fetching
+        if (collectingRef.current && history?.data?.foundOldest === false && history.status !== FetchStatus.Fetching) {
+            loadMore();
+        }
+        
+        // Stop collecting when we've found the oldest or if there's an error
+        if (collectingRef.current && (history?.data?.foundOldest || history?.status === FetchStatus.Failed)) {
+            collectingRef.current = false;
+            setIsCollectingForExport(false);
+            // Resolve or reject the promise based on status
+            if (resolveCollectionRef.current) {
+                if (history?.status === FetchStatus.Failed) {
+                    // If there's an error, we still resolve since we have partial data
+                    // The user can see the error and decide whether to retry
+                    console.warn('Collection stopped due to fetch error, exporting partial data');
+                }
+                resolveCollectionRef.current();
+                resolveCollectionRef.current = null;
+            }
+        }
+    }, [history, loadMore]);
+    
+    // Cleanup only on unmount, not on every render
+    React.useEffect(() => {
+        return () => {
+            // Only cleanup if actually collecting
+            if (collectingRef.current && resolveCollectionRef.current) {
+                collectingRef.current = false;
+                resolveCollectionRef.current();
+                resolveCollectionRef.current = null;
+            }
+        };
+    }, []); // Empty deps array means this only runs on mount/unmount
 
     const { allTransfers, hasTimestamps } = React.useMemo(() => {
         const detailedHistoryMap = history?.data?.transactionMap || new Map<string, ParsedTransactionWithMeta>();
@@ -265,8 +304,28 @@ export function TokenTransfersCard({ address }: { address: string }) {
         };
     }, [history, transactionRows, tokenInfo, pubkey, address, cluster, tokenInfoLoading]);
 
+    // Collect all remaining transfers before exporting
+    const collectAllTransfers = React.useCallback(async () => {
+        // If we already have all transfers, return immediately
+        if (history?.data?.foundOldest) {
+            return;
+        }
+
+        // Start the collection process
+        collectingRef.current = true;
+        setIsCollectingForExport(true);
+        
+        // Wait for the effect to complete loading via callback
+        return new Promise<void>((resolve) => {
+            resolveCollectionRef.current = resolve;
+        });
+    }, [history]);
+
     const handleExportCSV = React.useCallback(async () => {
         try {
+            // Collect all transfers first
+            await collectAllTransfers();
+            
             const csv = transfersToCSV(allTransfers);
             const base64 = Buffer.from(csv).toString('base64');
             const filename = `token-transfers-${sanitizeFilename(address)}.csv`;
@@ -274,10 +333,13 @@ export function TokenTransfersCard({ address }: { address: string }) {
         } catch (error) {
             console.error('Failed to export CSV:', error);
         }
-    }, [allTransfers, address]);
+    }, [allTransfers, address, collectAllTransfers]);
 
     const handleExportJSON = React.useCallback(async () => {
         try {
+            // Collect all transfers first
+            await collectAllTransfers();
+            
             const json = transfersToJSON(allTransfers);
             const base64 = Buffer.from(json).toString('base64');
             const filename = `token-transfers-${sanitizeFilename(address)}.json`;
@@ -285,7 +347,7 @@ export function TokenTransfersCard({ address }: { address: string }) {
         } catch (error) {
             console.error('Failed to export JSON:', error);
         }
-    }, [allTransfers, address]);
+    }, [allTransfers, address, collectAllTransfers]);
 
     if (!history) {
         return null;
@@ -300,6 +362,8 @@ export function TokenTransfersCard({ address }: { address: string }) {
     }
 
     const fetching = history.status === FetchStatus.Fetching;
+    const isExportDisabled = fetching || isCollectingForExport || allTransfers.length === 0;
+    
     return (
         <div className="card">
             <div className="card-header align-items-center">
@@ -308,18 +372,32 @@ export function TokenTransfersCard({ address }: { address: string }) {
                     <button
                         className="btn btn-white btn-sm"
                         onClick={handleExportCSV}
-                        disabled={fetching || allTransfers.length === 0}
-                        title="Export to CSV"
+                        disabled={isExportDisabled}
+                        title={isCollectingForExport ? "Collecting all transfers..." : "Export to CSV"}
                     >
-                        Export CSV
+                        {isCollectingForExport ? (
+                            <>
+                                <span className="align-text-top spinner-grow spinner-grow-sm me-2"></span>
+                                Collecting...
+                            </>
+                        ) : (
+                            'Export CSV'
+                        )}
                     </button>
                     <button
                         className="btn btn-white btn-sm"
                         onClick={handleExportJSON}
-                        disabled={fetching || allTransfers.length === 0}
-                        title="Export to JSON"
+                        disabled={isExportDisabled}
+                        title={isCollectingForExport ? "Collecting all transfers..." : "Export to JSON"}
                     >
-                        Export JSON
+                        {isCollectingForExport ? (
+                            <>
+                                <span className="align-text-top spinner-grow spinner-grow-sm me-2"></span>
+                                Collecting...
+                            </>
+                        ) : (
+                            'Export JSON'
+                        )}
                     </button>
                     <button className="btn btn-white btn-sm" disabled={fetching} onClick={() => refresh()}>
                         {fetching ? (
